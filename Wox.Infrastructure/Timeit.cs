@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using Wox.Infrastructure.Logger;
 
 namespace Wox.Infrastructure
 {
@@ -20,7 +21,9 @@ namespace Wox.Infrastructure
         public void Dispose()
         {
             stopwatch.Stop();
-            Debug.WriteLine(name + ":" + stopwatch.ElapsedMilliseconds + "ms");
+            string info = name + ":" + stopwatch.ElapsedMilliseconds + "ms";
+            Debug.WriteLine(info);
+            Log.Info(info);
         }
     }
 }
