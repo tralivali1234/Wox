@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using Wox.CommandArgs;
 using Wox.Helper;
+using Wox.Infrastructure;
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
 using StartupEventArgs = System.Windows.StartupEventArgs;
@@ -30,12 +31,15 @@ namespace Wox
 
         protected override void OnStartup(StartupEventArgs e)
         {
-            base.OnStartup(e);
-            DispatcherUnhandledException += ErrorReporting.DispatcherUnhandledException;
-            AppDomain.CurrentDomain.UnhandledException += ErrorReporting.UnhandledExceptionHandle;
+            using (new Timeit("Startup time"))
+            {
+                base.OnStartup(e);
+                DispatcherUnhandledException += ErrorReporting.DispatcherUnhandledException;
+                AppDomain.CurrentDomain.UnhandledException += ErrorReporting.UnhandledExceptionHandle;
 
-            Window = new MainWindow();
-            CommandArgsFactory.Execute(e.Args.ToList());
+                Window = new MainWindow();
+                CommandArgsFactory.Execute(e.Args.ToList());
+            }
         }
 
         public bool OnActivate(IList<string> args)

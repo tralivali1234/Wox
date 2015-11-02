@@ -209,16 +209,8 @@ namespace Wox
             Closing += MainWindow_Closing;
             //since MainWIndow implement IPublicAPI, so we need to finish ctor MainWindow object before
             //PublicAPI invoke in plugin init methods. E.g FolderPlugin
-            ThreadPool.QueueUserWorkItem(o =>
-            {
-                Thread.Sleep(50);
-                PluginManager.Init(this);
-            });
-            ThreadPool.QueueUserWorkItem(o =>
-            {
-                Thread.Sleep(50);
-                PreLoadImages();
-            });
+            PluginManager.Init(this);
+            PreLoadImages();
         }
 
         void pnlResult_ItemDropEvent(Result result, IDataObject dropDataObject, DragEventArgs args)
