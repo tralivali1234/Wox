@@ -1,8 +1,10 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Newtonsoft.Json;
 using Wox.Infrastructure.Exception;
@@ -13,71 +15,94 @@ namespace Wox.Core.Plugin
 {
     /// <summary>
     /// Represent the plugin that using JsonPRC
+    /// every JsonRPC plugin should has its own plugin instance
     /// </summary>
-    internal abstract class JsonRPCPlugin : IPlugin
+    internal abstract class JsonRPCPlugin : IPlugin, IContextMenu
     {
         protected PluginInitContext context;
+        public const string JsonRPC = "JsonRPC";
 
         /// <summary>
         /// The language this JsonRPCPlugin support
         /// </summary>
-        public abstract string SupportedLanguage { get; }
+        public abstract string SupportedLanguage { get; set; }
 
         protected abstract string ExecuteQuery(Query query);
         protected abstract string ExecuteCallback(JsonRPCRequestModel rpcRequest);
+        protected abstract string ExecuteContextMenu(Result selectedResult);
 
         public List<Result> Query(Query query)
         {
             string output = ExecuteQuery(query);
-            if (!string.IsNullOrEmpty(output))
+            try
             {
-                try
+                return DeserializedResult(output);
+            }
+            catch (Exception e)
+            {
+                Log.Exception($"|JsonRPCPlugin.Query|Exception when query <{query}>", e);
+                return null;
+            }
+        }
+
+        public List<Result> LoadContextMenus(Result selectedResult)
+        {
+            string output = ExecuteContextMenu(selectedResult);
+            try
+            {
+                return DeserializedResult(output);
+            }
+            catch (Exception e)
+            {
+                Log.Exception($"|JsonRPCPlugin.LoadContextMenus|Exception on result <{selectedResult}>", e);
+                return null;
+            }
+        }
+
+        private List<Result> DeserializedResult(string output)
+        {
+            if (!String.IsNullOrEmpty(output))
+            {
+                List<Result> results = new List<Result>();
+
+                JsonRPCQueryResponseModel queryResponseModel = JsonConvert.DeserializeObject<JsonRPCQueryResponseModel>(output);
+                if (queryResponseModel.Result == null) return null;
+
+                foreach (JsonRPCResult result in queryResponseModel.Result)
                 {
-                    List<Result> results = new List<Result>();
-
-                    JsonRPCQueryResponseModel queryResponseModel = JsonConvert.DeserializeObject<JsonRPCQueryResponseModel>(output);
-                    if (queryResponseModel.Result == null) return null;
-
-                    foreach (JsonRPCResult result in queryResponseModel.Result)
+                    JsonRPCResult result1 = result;
+                    result.Action = c =>
                     {
-                        JsonRPCResult result1 = result;
-                        result.Action = (c) =>
-                        {
-                            if (result1.JsonRPCAction == null) return false;
+                        if (result1.JsonRPCAction == null) return false;
 
-                            if (!string.IsNullOrEmpty(result1.JsonRPCAction.Method))
+                        if (!String.IsNullOrEmpty(result1.JsonRPCAction.Method))
+                        {
+                            if (result1.JsonRPCAction.Method.StartsWith("Wox."))
                             {
-                                if (result1.JsonRPCAction.Method.StartsWith("Wox."))
+                                ExecuteWoxAPI(result1.JsonRPCAction.Method.Substring(4), result1.JsonRPCAction.Parameters);
+                            }
+                            else
+                            {
+                                string actionReponse = ExecuteCallback(result1.JsonRPCAction);
+                                JsonRPCRequestModel jsonRpcRequestModel = JsonConvert.DeserializeObject<JsonRPCRequestModel>(actionReponse);
+                                if (jsonRpcRequestModel != null
+                                    && !String.IsNullOrEmpty(jsonRpcRequestModel.Method)
+                                    && jsonRpcRequestModel.Method.StartsWith("Wox."))
                                 {
-                                    ExecuteWoxAPI(result1.JsonRPCAction.Method.Substring(4), result1.JsonRPCAction.Parameters);
-                                }
-                                else
-                                {
-                                    ThreadPool.QueueUserWorkItem(state =>
-                                    {
-                                        string actionReponse = ExecuteCallback(result1.JsonRPCAction);
-                                        JsonRPCRequestModel jsonRpcRequestModel = JsonConvert.DeserializeObject<JsonRPCRequestModel>(actionReponse);
-                                        if (jsonRpcRequestModel != null
-                                            && !string.IsNullOrEmpty(jsonRpcRequestModel.Method)
-                                            && jsonRpcRequestModel.Method.StartsWith("Wox."))
-                                        {
-                                            ExecuteWoxAPI(jsonRpcRequestModel.Method.Substring(4), jsonRpcRequestModel.Parameters);
-                                        }
-                                    });
+                                    ExecuteWoxAPI(jsonRpcRequestModel.Method.Substring(4), jsonRpcRequestModel.Parameters);
                                 }
                             }
-                            return !result1.JsonRPCAction.DontHideAfterAction;
-                        };
-                        results.Add(result);
-                    }
-                    return results;
+                        }
+                        return !result1.JsonRPCAction.DontHideAfterAction;
+                    };
+                    results.Add(result);
                 }
-                catch (System.Exception e)
-                {
-                    Log.Error(e);
-                }
+                return results;
             }
-            return null;
+            else
+            {
+                return null;
+            }
         }
 
         private void ExecuteWoxAPI(string method, object[] parameters)
@@ -89,7 +114,7 @@ namespace Wox.Core.Plugin
                 {
                     methodInfo.Invoke(PluginManager.API, parameters);
                 }
-                catch (System.Exception)
+                catch (Exception)
                 {
 #if (DEBUG)
                     {
@@ -122,39 +147,53 @@ namespace Wox.Core.Plugin
         {
             try
             {
-                using (Process process = Process.Start(startInfo))
+                using (var process = Process.Start(startInfo))
                 {
                     if (process != null)
                     {
-                        using (StreamReader reader = process.StandardOutput)
+                        using (var standardOutput = process.StandardOutput)
                         {
-                            string result = reader.ReadToEnd();
-                            if (result.StartsWith("DEBUG:"))
-                            {
-                                MessageBox.Show(new Form { TopMost = true }, result.Substring(6));
-                                return "";
-                            }
+                            var result = standardOutput.ReadToEnd();
                             if (string.IsNullOrEmpty(result))
                             {
-                                using (StreamReader errorReader = process.StandardError)
+                                using (var standardError = process.StandardError)
                                 {
-                                    string error = errorReader.ReadToEnd();
+                                    var error = standardError.ReadToEnd();
                                     if (!string.IsNullOrEmpty(error))
                                     {
-                                        throw new WoxJsonRPCException(error);
+                                        Log.Error($"|JsonRPCPlugin.Execute|{error}");
+                                        return string.Empty;
+                                    }
+                                    else
+                                    {
+                                        Log.Error("|JsonRPCPlugin.Execute|Empty standard output and standard error.");
+                                        return string.Empty;
                                     }
                                 }
                             }
-                            return result;
+                            else if (result.StartsWith("DEBUG:"))
+                            {
+                                MessageBox.Show(new Form { TopMost = true }, result.Substring(6));
+                                return string.Empty;
+                            }
+                            else
+                            {
+                                return result;
+                            }
                         }
+                    }
+                    else
+                    {
+                        Log.Error("|JsonRPCPlugin.Execute|Can't start new process");
+                        return string.Empty;
                     }
                 }
             }
-            catch(System.Exception e)
+            catch (Exception e)
             {
-                throw new WoxJsonRPCException(e.Message);
+                Log.Exception($"|JsonRPCPlugin.Execute|Exception for filename <{startInfo.FileName}> with argument <{startInfo.Arguments}>", e);
+                return string.Empty;
             }
-            return null;
         }
 
         public void Init(PluginInitContext ctx)

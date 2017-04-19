@@ -1,51 +1,101 @@
 ﻿using System;
+using System.Globalization;
 using System.IO;
-using System.Threading;
 using Newtonsoft.Json;
+using Wox.Infrastructure.Logger;
 
 namespace Wox.Infrastructure.Storage
 {
     /// <summary>
     /// Serialize object using json format.
     /// </summary>
-    public abstract class JsonStrorage<T> : BaseStorage<T> where T : class, IStorage, new()
+    public class JsonStrorage<T>
     {
-        private static object syncObject = new object();
-        protected override string FileSuffix
+        private readonly JsonSerializerSettings _serializerSettings;
+        private T _data;
+        // need a new directory name
+        public const string DirectoryName = "Settings";
+        public const string FileSuffix = ".json";
+        public string FilePath { get; set; }
+        public string DirectoryPath { get; set; }
+
+
+        internal JsonStrorage()
         {
-            get { return ".json"; }
+            // use property initialization instead of DefaultValueAttribute
+            // easier and flexible for default value of object
+            _serializerSettings = new JsonSerializerSettings
+            {
+                ObjectCreationHandling = ObjectCreationHandling.Replace,
+                NullValueHandling = NullValueHandling.Ignore
+            };
         }
 
-        protected override void LoadInternal()
+        public T Load()
         {
-            string json = File.ReadAllText(ConfigPath);
-            if (!string.IsNullOrEmpty(json))
+            if (File.Exists(FilePath))
             {
-                try
+                var searlized = File.ReadAllText(FilePath);
+                if (!string.IsNullOrWhiteSpace(searlized))
                 {
-                    serializedObject = JsonConvert.DeserializeObject<T>(json);
+                    Deserialize(searlized);
                 }
-                catch (System.Exception)
+                else
                 {
-                    serializedObject = LoadDefault();
+                    LoadDefault();
                 }
             }
             else
             {
-                serializedObject = LoadDefault();
+                LoadDefault();
+            }
+            return _data.NonNull();
+        }
+
+        private void Deserialize(string searlized)
+        {
+            try
+            {
+                _data = JsonConvert.DeserializeObject<T>(searlized, _serializerSettings);
+            }
+            catch (JsonException e)
+            {
+                LoadDefault();
+                Log.Exception($"|JsonStrorage.Deserialize|Deserialize error for json <{FilePath}>", e);
+            }
+
+            if (_data == null)
+            {
+                LoadDefault();
             }
         }
 
-        protected override void SaveInternal()
+        private void LoadDefault()
         {
-            ThreadPool.QueueUserWorkItem(o =>
+            if (File.Exists(FilePath))
             {
-                lock (syncObject)
-                {
-                    string json = JsonConvert.SerializeObject(serializedObject, Formatting.Indented);
-                    File.WriteAllText(ConfigPath, json);
-                }
-            });
+                BackupOriginFile();
+            }
+
+            _data = JsonConvert.DeserializeObject<T>("{}", _serializerSettings);
+            Save();
+        }
+
+        private void BackupOriginFile()
+        {
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd-HH-mm-ss-fffffff", CultureInfo.CurrentUICulture);
+            var directory = Path.GetDirectoryName(FilePath).NonNull();
+            var originName = Path.GetFileNameWithoutExtension(FilePath);
+            var backupName = $"{originName}-{timestamp}{FileSuffix}";
+            var backupPath = Path.Combine(directory, backupName);
+            File.Copy(FilePath, backupPath, true);
+            // todo give user notification for the backup process
+        }
+
+        public void Save()
+        {
+            string serialized = JsonConvert.SerializeObject(_data, Formatting.Indented);
+            File.WriteAllText(FilePath, serialized);
         }
     }
 }

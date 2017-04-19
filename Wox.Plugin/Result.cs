@@ -1,29 +1,39 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Windows.Media;
 
 namespace Wox.Plugin
 {
 
     public class Result
     {
+
+        private string _pluginDirectory;
+        private string _icoPath;
         public string Title { get; set; }
         public string SubTitle { get; set; }
-        public string IcoPath { get; set; }
 
-        public string FullIcoPath
+        public string IcoPath
         {
-            get
+            get { return _icoPath; }
+            set
             {
-                if (string.IsNullOrEmpty(IcoPath)) return string.Empty;
-                if (IcoPath.StartsWith("data:"))
+                if (!string.IsNullOrEmpty(PluginDirectory) && !Path.IsPathRooted(value))
                 {
-                    return IcoPath;
+                    _icoPath = Path.Combine(value, IcoPath);
                 }
-
-                return Path.Combine(PluginDirectory, IcoPath);
+                else
+                {
+                    _icoPath = value;
+                }
             }
         }
+
+        public delegate ImageSource IconDelegate();
+
+        public IconDelegate Icon;
+
 
         /// <summary>
         /// return true to hide wox after select result
@@ -40,7 +50,18 @@ namespace Wox.Plugin
         /// <summary>
         /// Plugin directory
         /// </summary>
-        public string PluginDirectory { get; internal set; }
+        public string PluginDirectory
+        {
+            get { return _pluginDirectory; }
+            set
+            {
+                _pluginDirectory = value;
+                if (!string.IsNullOrEmpty(IcoPath) && !Path.IsPathRooted(IcoPath))
+                {
+                    IcoPath = Path.Combine(value, IcoPath);
+                }
+            }
+        }
 
         public override bool Equals(object obj)
         {
@@ -48,8 +69,7 @@ namespace Wox.Plugin
             if (r != null)
             {
                 var equality = string.Equals(r.Title, Title) &&
-                               string.Equals(r.SubTitle, SubTitle) &&
-                               r.Score == Score;
+                               string.Equals(r.SubTitle, SubTitle);
                 return equality;
             }
             else
@@ -61,8 +81,7 @@ namespace Wox.Plugin
         public override int GetHashCode()
         {
             var hashcode = (Title?.GetHashCode() ?? 0) ^
-                           (SubTitle?.GetHashCode() ?? 0) ^
-                           (Score.GetHashCode());
+                           (SubTitle?.GetHashCode() ?? 0);
             return hashcode;
         }
 
@@ -71,23 +90,21 @@ namespace Wox.Plugin
             return Title + SubTitle;
         }
 
-        public Result()
-        {
+        [Obsolete("Use IContextMenu instead")]
+        /// <summary>
+        /// Context menus associate with this result
+        /// </summary>
+        public List<Result> ContextMenu { get; set; }
 
-        }
-
-        public Result(string Title = null, string IcoPath = null, string SubTitle = null)
+        [Obsolete("Use Object initializers instead")]
+        public Result(string Title, string IcoPath, string SubTitle = null)
         {
             this.Title = Title;
             this.IcoPath = IcoPath;
             this.SubTitle = SubTitle;
         }
 
-        [Obsolete("Use IContextMenu instead")]
-        /// <summary>
-        /// Context menus associate with this result
-        /// </summary>
-        public List<Result> ContextMenu { get; set; }
+        public Result() { }
 
         /// <summary>
         /// Additional data associate with this result

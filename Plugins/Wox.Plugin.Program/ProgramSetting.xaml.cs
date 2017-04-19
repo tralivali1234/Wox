@@ -1,7 +1,8 @@
-﻿using System;
-using System.Threading;
+﻿using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using Wox.Plugin.Program.Programs;
 
 namespace Wox.Plugin.Program
 {
@@ -11,52 +12,53 @@ namespace Wox.Plugin.Program
     public partial class ProgramSetting : UserControl
     {
         private PluginInitContext context;
+        private Settings _settings;
 
-        public ProgramSetting(PluginInitContext context)
+        public ProgramSetting(PluginInitContext context, Settings settings)
         {
             this.context = context;
             InitializeComponent();
             Loaded += Setting_Loaded;
+            _settings = settings;
         }
 
         private void Setting_Loaded(object sender, RoutedEventArgs e)
         {
-            programSourceView.ItemsSource = ProgramStorage.Instance.ProgramSources;
-            StartMenuEnabled.IsChecked = ProgramStorage.Instance.EnableStartMenuSource;
-            RegistryEnabled.IsChecked = ProgramStorage.Instance.EnableRegistrySource;
+            programSourceView.ItemsSource = _settings.ProgramSources;
+            StartMenuEnabled.IsChecked = _settings.EnableStartMenuSource;
+            RegistryEnabled.IsChecked = _settings.EnableRegistrySource;
         }
 
         private void ReIndexing()
         {
             programSourceView.Items.Refresh();
-            ThreadPool.QueueUserWorkItem(t =>
+            Task.Run(() =>
             {
-                Dispatcher.Invoke(new Action(() => { indexingPanel.Visibility = Visibility.Visible; }));
-                Programs.IndexPrograms();
-                Dispatcher.Invoke(new Action(() => { indexingPanel.Visibility = Visibility.Hidden; }));
+                Dispatcher.Invoke(() => { indexingPanel.Visibility = Visibility.Visible; });
+                Main.IndexPrograms();
+                Dispatcher.Invoke(() => { indexingPanel.Visibility = Visibility.Hidden; });
             });
         }
 
         private void btnAddProgramSource_OnClick(object sender, RoutedEventArgs e)
         {
-            var add = new AddProgramSource();
+            var add = new AddProgramSource(_settings);
             if(add.ShowDialog() ?? false)
             {
-                this.ReIndexing();
+                ReIndexing();
             }
         }
 
         private void btnDeleteProgramSource_OnClick(object sender, RoutedEventArgs e)
         {
-            ProgramSource selectedProgramSource = programSourceView.SelectedItem as ProgramSource;
+            var selectedProgramSource = programSourceView.SelectedItem as Settings.ProgramSource;
             if (selectedProgramSource != null)
             {
                 string msg = string.Format(context.API.GetTranslation("wox_plugin_program_delete_program_source"), selectedProgramSource.Location);
 
                 if (MessageBox.Show(msg, string.Empty, MessageBoxButton.YesNo) == MessageBoxResult.Yes)
                 {
-                    ProgramStorage.Instance.ProgramSources.Remove(selectedProgramSource);
-                    ProgramStorage.Instance.Save();
+                    _settings.ProgramSources.Remove(selectedProgramSource);
                     ReIndexing();
                 }
             }
@@ -69,13 +71,13 @@ namespace Wox.Plugin.Program
 
         private void btnEditProgramSource_OnClick(object sender, RoutedEventArgs e)
         {
-            ProgramSource selectedProgramSource = programSourceView.SelectedItem as ProgramSource;
+            var selectedProgramSource = programSourceView.SelectedItem as Settings.ProgramSource;
             if (selectedProgramSource != null)
             {
-                var add = new AddProgramSource(selectedProgramSource);
+                var add = new AddProgramSource(selectedProgramSource, _settings);
                 if (add.ShowDialog() ?? false)
                 {
-                    this.ReIndexing();
+                    ReIndexing();
                 }
             }
             else
@@ -92,7 +94,7 @@ namespace Wox.Plugin.Program
 
         private void BtnProgramSuffixes_OnClick(object sender, RoutedEventArgs e)
         {
-            ProgramSuffixes p = new ProgramSuffixes(context);
+            ProgramSuffixes p = new ProgramSuffixes(context, _settings);
             p.ShowDialog();
         }
 
@@ -116,16 +118,13 @@ namespace Wox.Plugin.Program
             {
                 foreach (string s in files)
                 {
-                    if (System.IO.Directory.Exists(s) == true)
+                    if (Directory.Exists(s))
                     {
-                        ProgramStorage.Instance.ProgramSources.Add(new ProgramSource()
+                        _settings.ProgramSources.Add(new Settings.ProgramSource
                         {
-                            Location = s,
-                            Type = "FileSystemProgramSource",
-                            Enabled = true
+                            Location = s
                         });
 
-                        ProgramStorage.Instance.Save();
                         ReIndexing();
                     }
                 }
@@ -134,15 +133,13 @@ namespace Wox.Plugin.Program
 
         private void StartMenuEnabled_Click(object sender, RoutedEventArgs e)
         {
-            ProgramStorage.Instance.EnableStartMenuSource = StartMenuEnabled.IsChecked ?? false;
-            ProgramStorage.Instance.Save();
+            _settings.EnableStartMenuSource = StartMenuEnabled.IsChecked ?? false;
             ReIndexing();
         }
 
         private void RegistryEnabled_Click(object sender, RoutedEventArgs e)
         {
-            ProgramStorage.Instance.EnableRegistrySource = RegistryEnabled.IsChecked ?? false;
-            ProgramStorage.Instance.Save();
+            _settings.EnableRegistrySource = RegistryEnabled.IsChecked ?? false;
             ReIndexing();
         }
     }

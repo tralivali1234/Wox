@@ -1,9 +1,9 @@
 ﻿using System;
 using System.IO;
 using System.Reflection;
+using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters;
 using System.Runtime.Serialization.Formatters.Binary;
-using System.Threading;
 using Wox.Infrastructure.Logger;
 
 namespace Wox.Infrastructure.Storage
@@ -11,57 +11,66 @@ namespace Wox.Infrastructure.Storage
     /// <summary>
     /// Stroage object using binary data
     /// Normally, it has better performance, but not readable
-    /// You MUST mark implement class as Serializable
     /// </summary>
-    [Serializable]
-    public abstract class BinaryStorage<T> : BaseStorage<T> where T : class, IStorage, new()
+    public class BinaryStorage<T>
     {
-        private static object syncObject = new object();
-        protected override string FileSuffix
+        public BinaryStorage(string filename)
         {
-            get { return ".dat"; }
+            const string directoryName = "Cache";
+            var directoryPath = Path.Combine(Constant.DataDirectory, directoryName);
+            Helper.ValidateDirectory(directoryPath);
+
+            const string fileSuffix = ".cache";
+            FilePath = Path.Combine(directoryPath, $"{filename}{fileSuffix}");
         }
 
-        protected override void LoadInternal()
+        public string FilePath { get; }
+
+        public T TryLoad(T defaultData)
         {
-            //http://stackoverflow.com/questions/2120055/binaryformatter-deserialize-gives-serializationexception
-            AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
-            try
+            if (File.Exists(FilePath))
             {
-                using (FileStream fileStream = new FileStream(ConfigPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var stream = new FileStream(FilePath, FileMode.Open))
                 {
-                    if (fileStream.Length > 0)
+                    if (stream.Length > 0)
                     {
-                        BinaryFormatter binaryFormatter = new BinaryFormatter
-                        {
-                            AssemblyFormat = FormatterAssemblyStyle.Simple
-                        };
-                        serializedObject = binaryFormatter.Deserialize(fileStream) as T;
-                        if (serializedObject == null)
-                        {
-                            serializedObject = LoadDefault();
-#if (DEBUG)
-                            {
-                                throw new System.Exception("deserialize failed");
-                            }
-#endif
-                        }
+                        var d = Deserialize(stream, defaultData);
+                        return d;
                     }
                     else
                     {
-                        serializedObject = LoadDefault();
+                        Log.Error($"|BinaryStorage.TryLoad|Zero length cache file <{FilePath}>");
+                        Save(defaultData);
+                        return defaultData;
                     }
                 }
             }
+            else
+            {
+                Log.Info("|BinaryStorage.TryLoad|Cache file not exist, load default data");
+                Save(defaultData);
+                return defaultData;
+            }
+        }
+
+        private T Deserialize(FileStream stream, T defaultData)
+        {
+            //http://stackoverflow.com/questions/2120055/binaryformatter-deserialize-gives-serializationexception
+            AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
+            BinaryFormatter binaryFormatter = new BinaryFormatter
+            {
+                AssemblyFormat = FormatterAssemblyStyle.Simple
+            };
+
+            try
+            {
+                var t = ((T)binaryFormatter.Deserialize(stream)).NonNull();
+                return t;
+            }
             catch (System.Exception e)
             {
-                Log.Error(e);
-                serializedObject = LoadDefault();
-#if (DEBUG)
-                {
-                    throw;
-                }
-#endif
+                Log.Exception($"|BinaryStorage.Deserialize|Deserialize error for file <{FilePath}>", e);
+                return defaultData;
             }
             finally
             {
@@ -69,7 +78,7 @@ namespace Wox.Infrastructure.Storage
             }
         }
 
-        private System.Reflection.Assembly CurrentDomain_AssemblyResolve(object sender, ResolveEventArgs args)
+        private Assembly CurrentDomain_AssemblyResolve(object sender, ResolveEventArgs args)
         {
             Assembly ayResult = null;
             string sShortAssemblyName = args.Name.Split(',')[0];
@@ -85,33 +94,24 @@ namespace Wox.Infrastructure.Storage
             return ayResult;
         }
 
-        protected override void SaveInternal()
+        public void Save(T data)
         {
-            ThreadPool.QueueUserWorkItem(o =>
+            using (var stream = new FileStream(FilePath, FileMode.Create))
             {
-                lock (syncObject)
+                BinaryFormatter binaryFormatter = new BinaryFormatter
                 {
-                    try
-                    {
-                        FileStream fileStream = new FileStream(ConfigPath, FileMode.Create);
-                        BinaryFormatter binaryFormatter = new BinaryFormatter
-                        {
-                            AssemblyFormat = FormatterAssemblyStyle.Simple
-                        };
-                        binaryFormatter.Serialize(fileStream, serializedObject);
-                        fileStream.Close();
-                    }
-                    catch (System.Exception e)
-                    {
-                        Log.Error(e);
-#if (DEBUG)
-                        {
-                            throw;
-                        }
-#endif
-                    }
+                    AssemblyFormat = FormatterAssemblyStyle.Simple
+                };
+
+                try
+                {
+                    binaryFormatter.Serialize(stream, data);
                 }
-            });
+                catch (SerializationException e)
+                {
+                    Log.Exception($"|BinaryStorage.Save|serialize error for file <{FilePath}>", e);
+                }
+            }
         }
     }
 }
